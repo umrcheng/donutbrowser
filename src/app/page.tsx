@@ -765,6 +765,7 @@ export default function Home() {
     // the static SHORTCUTS table. Skipped while typing in an input, EXCEPT
     // ⌘K and ⌘/ which are meta-level shortcuts and should always be reachable.
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!e || !e.key) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const isTyping =

@@ -43,7 +43,7 @@ export function useKonamiCode(onUnlock: () => void) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!event?.key || event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTyping(event.target)) {
         progress.current = 0;
         return;

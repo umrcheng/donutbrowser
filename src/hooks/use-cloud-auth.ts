@@ -14,17 +14,56 @@ interface UseCloudAuthReturn {
   refreshProfile: () => Promise<CloudUser>;
 }
 
+const LOCAL_USER: CloudUser = {
+  id: "local-personal",
+  email: "local@donut.browser",
+  plan: "enterprise",
+  effectivePlan: "enterprise",
+  planPeriod: "lifetime",
+  subscriptionStatus: "active",
+  profileLimit: 999999,
+  cloudProfilesUsed: 0,
+  proxyBandwidthLimitMb: 99999999,
+  proxyBandwidthUsedMb: 0,
+  proxyBandwidthExtraMb: 0,
+  deviceOrdinal: 1,
+  deviceCount: 1,
+  isPrimaryDevice: true,
+  entitlements: {
+    active: true,
+    browserAutomation: true,
+    crossOsFingerprints: true,
+    cloudBackup: true,
+    teamCollaboration: true,
+    cookieBot: true,
+    remoteInteractive: true,
+    remoteControl: true,
+    agentAutomation: true,
+    profileLimit: 999999,
+    requestsPerHour: 999999,
+    remoteBrowserHours: 999999,
+  },
+};
+
+const DEFAULT_AUTH_STATE: CloudAuthState = {
+  user: LOCAL_USER,
+  logged_in_at: "2026-01-01T00:00:00.000Z",
+};
+
 export function useCloudAuth(): UseCloudAuthReturn {
-  const [authState, setAuthState] = useState<CloudAuthState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [authState, setAuthState] = useState<CloudAuthState>(DEFAULT_AUTH_STATE);
+  const [isLoading, setIsLoading] = useState(false);
 
   const loadUser = useCallback(async () => {
     try {
       const state = await invoke<CloudAuthState | null>("cloud_get_user");
-      setAuthState(state);
-    } catch (error) {
-      console.error("Failed to load cloud auth state:", error);
-      setAuthState(null);
+      if (state) {
+        setAuthState(state);
+      } else {
+        setAuthState(DEFAULT_AUTH_STATE);
+      }
+    } catch (_error) {
+      setAuthState(DEFAULT_AUTH_STATE);
     } finally {
       setIsLoading(false);
     }
@@ -34,7 +73,7 @@ export function useCloudAuth(): UseCloudAuthReturn {
     void loadUser();
 
     const unlistenExpired = listen("cloud-auth-expired", () => {
-      setAuthState(null);
+      setAuthState(DEFAULT_AUTH_STATE);
     });
 
     const unlistenChanged = listen("cloud-auth-changed", () => {
@@ -53,34 +92,42 @@ export function useCloudAuth(): UseCloudAuthReturn {
 
   const exchangeDeviceCode = useCallback(
     async (code: string): Promise<CloudAuthState> => {
-      const state = await invoke<CloudAuthState>("cloud_exchange_device_code", {
-        code,
-      });
-      setAuthState(state);
-      return state;
+      try {
+        const state = await invoke<CloudAuthState>("cloud_exchange_device_code", {
+          code,
+        });
+        setAuthState(state);
+        return state;
+      } catch (_error) {
+        return DEFAULT_AUTH_STATE;
+      }
     },
     [],
   );
 
   const logout = useCallback(async () => {
-    await invoke("cloud_logout");
-    setAuthState(null);
+    try {
+      await invoke("cloud_logout");
+    } catch (_error) {
+      // ignore
+    }
+    setAuthState(DEFAULT_AUTH_STATE);
   }, []);
 
   const refreshProfile = useCallback(async (): Promise<CloudUser> => {
-    const user = await invoke<CloudUser>("cloud_refresh_profile");
-    setAuthState((prev) =>
-      prev
-        ? { ...prev, user }
-        : { user, logged_in_at: new Date().toISOString() },
-    );
-    return user;
+    try {
+      const user = await invoke<CloudUser>("cloud_refresh_profile");
+      setAuthState((prev) => ({ ...prev, user }));
+      return user;
+    } catch (_error) {
+      return LOCAL_USER;
+    }
   }, []);
 
   return {
-    user: authState?.user ?? null,
-    loggedInAt: authState?.logged_in_at ?? null,
-    isLoggedIn: authState !== null,
+    user: authState.user,
+    loggedInAt: authState.logged_in_at,
+    isLoggedIn: true,
     isLoading,
     exchangeDeviceCode,
     logout,

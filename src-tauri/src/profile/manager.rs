@@ -272,8 +272,28 @@ impl ProfileManager {
             config.fingerprint = if config.identity_id.is_some() {
               None
             } else {
-              Some(generated.fingerprint)
+              Some(generated.fingerprint.clone())
             };
+
+            // In local offline mode without official token, ensure cross-OS overrides are persisted
+            if let Some(target_os) = config.os.as_deref() {
+              let host_os = crate::profile::types::get_host_os();
+              if target_os != host_os {
+                let base_ua = serde_json::from_str::<serde_json::Value>(&generated.fingerprint)
+                  .ok()
+                  .and_then(|v| v.get("userAgent").and_then(|u| u.as_str()).map(str::to_string));
+                let extra_overrides = crate::wayfern_manager::WayfernManager::generate_cross_os_overrides(target_os, base_ua.as_deref());
+                let mut current_overrides = config.identity_overrides
+                  .as_deref()
+                  .and_then(|s| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(s).ok())
+                  .unwrap_or_default();
+                for (k, v) in extra_overrides {
+                  current_overrides.insert(k, v);
+                }
+                config.identity_overrides = serde_json::to_string(&current_overrides).ok();
+              }
+            }
+
             geolocation_applied = generated.geolocation_applied;
             log::info!("Successfully generated fingerprint for Wayfern profile: {name}");
           }
@@ -2355,21 +2375,6 @@ pub async fn update_wayfern_config(
   profile_id: String,
   config: WayfernConfig,
 ) -> Result<(), String> {
-  if (config.fingerprint.is_some() || config.identity_overrides.is_some())
-    && !crate::cloud_auth::CLOUD_AUTH
-      .can_use_cross_os_fingerprints()
-      .await
-  {
-    return Err(serde_json::json!({ "code": "FINGERPRINT_REQUIRES_PRO" }).to_string());
-  }
-
-  if !crate::cloud_auth::CLOUD_AUTH
-    .is_fingerprint_os_allowed(config.os.as_deref())
-    .await
-  {
-    return Err(serde_json::json!({ "code": "FINGERPRINT_REQUIRES_PRO" }).to_string());
-  }
-
   let profile_manager = ProfileManager::instance();
   profile_manager
     .update_wayfern_config(app_handle, &profile_id, config)

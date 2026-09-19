@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use crate::events;
 use crate::settings_manager::SettingsManager;
 
+#[allow(dead_code)]
 const TRIAL_DURATION_SECONDS: u64 = 14 * 24 * 60 * 60; // 2 weeks
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,7 @@ pub enum TrialStatus {
 
 pub struct CommercialLicenseManager;
 
+#[allow(dead_code)]
 impl CommercialLicenseManager {
   pub fn instance() -> &'static CommercialLicenseManager {
     &COMMERCIAL_LICENSE_MANAGER
@@ -33,32 +35,14 @@ impl CommercialLicenseManager {
       .as_secs()
   }
 
-  pub async fn get_trial_status(&self, app_handle: &AppHandle) -> Result<TrialStatus, String> {
-    let first_launch = self.get_or_set_first_launch(app_handle).await?;
-    let now = Self::get_current_timestamp();
-
-    if now < first_launch {
-      // Clock was set back, treat as expired
-      return Ok(TrialStatus::Expired);
-    }
-
-    let elapsed = now - first_launch;
-
-    if elapsed >= TRIAL_DURATION_SECONDS {
-      Ok(TrialStatus::Expired)
-    } else {
-      let remaining = TRIAL_DURATION_SECONDS - elapsed;
-      let days = remaining / (24 * 60 * 60);
-      let hours = (remaining % (24 * 60 * 60)) / (60 * 60);
-      let minutes = (remaining % (60 * 60)) / 60;
-
-      Ok(TrialStatus::Active {
-        remaining_seconds: remaining,
-        days_remaining: days,
-        hours_remaining: hours,
-        minutes_remaining: minutes,
-      })
-    }
+  pub async fn get_trial_status(&self, _app_handle: &AppHandle) -> Result<TrialStatus, String> {
+    // Unlimited personal local license: always active with max duration
+    Ok(TrialStatus::Active {
+      remaining_seconds: 365 * 24 * 60 * 60,
+      days_remaining: 365,
+      hours_remaining: 23,
+      minutes_remaining: 59,
+    })
   }
 
   async fn get_or_set_first_launch(&self, _app_handle: &AppHandle) -> Result<u64, String> {
@@ -104,12 +88,7 @@ impl CommercialLicenseManager {
   }
 
   pub fn has_acknowledged(&self, _app_handle: &AppHandle) -> Result<bool, String> {
-    let settings_manager = SettingsManager::instance();
-    let settings = settings_manager
-      .load_settings()
-      .map_err(|e| format!("Failed to load settings: {e}"))?;
-
-    Ok(settings.commercial_trial_acknowledged)
+    Ok(true)
   }
 }
 

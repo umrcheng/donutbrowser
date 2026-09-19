@@ -44,7 +44,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cookieBotScopeFor, useCookieBot } from "@/hooks/use-cookie-bot";
-import { translateBackendError } from "@/lib/backend-errors";
+import { parseBackendError, translateBackendError } from "@/lib/backend-errors";
 import {
   type CookieBotRun,
   type CookieBotSchedule,
@@ -141,7 +141,12 @@ export function CookieBotPage({
   const [isRemoving, setIsRemoving] = useState(false);
 
   const isLoading = isStoreLoading || isLoadingRuns;
-  const loadError: unknown = runsError ?? storeError;
+  const isIgnoredError = (err: unknown) => {
+    const code = parseBackendError(err)?.code;
+    return code === "CLOUD_NOT_SIGNED_IN" || code === "CLOUD_UNREACHABLE";
+  };
+  const rawLoadError = runsError ?? storeError;
+  const loadError: unknown = isIgnoredError(rawLoadError) ? null : rawLoadError;
 
   /**
    * Runs are the one thing the shared store does not hold: only this page and

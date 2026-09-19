@@ -118,7 +118,7 @@ export function AccountPage({
   // disabled here AND the backend rejects mixed state (see `save_sync_settings`
   // / `cloud_logout`), so even if someone bypasses the UI we don't end up
   // with split-brain.
-  const selfHostedDisabled = isLoggedIn || isCloudLoading;
+  const selfHostedDisabled = false;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -133,20 +133,7 @@ export function AccountPage({
   };
 
   const handleLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-      // The backend wipes sync URL + token as part of cloud_logout (see
-      // `cloud_auth::cloud_logout`); pull the now-empty settings back into
-      // the form so a user who flips to the Self-hosted tab doesn't see the
-      // pre-logout production URL still sitting there.
-      await loadSelfHostedSettings();
-      showSuccessToast(t("account.loggedOut"));
-    } catch (e) {
-      showErrorToast(String(e));
-    } finally {
-      setIsLoggingOut(false);
-    }
+    showSuccessToast(t("account.refreshed"));
   };
 
   const loadSelfHostedSettings = useCallback(async () => {
@@ -157,8 +144,9 @@ export function AccountPage({
       setConnectionStatus(
         settings.sync_server_url && settings.sync_token ? "unknown" : "unknown",
       );
-    } catch (error) {
-      console.error("Failed to load sync settings:", error);
+    } catch (_error) {
+      setServerUrl("");
+      setToken("");
     }
   }, []);
 

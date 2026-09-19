@@ -806,6 +806,14 @@ fn base() -> String {
 
 /// Every enrolment the caller can see.
 pub async fn list_schedules(scope: Option<&str>) -> Result<CookieBotScheduleList, CookieBotError> {
+  if crate::cloud_auth::CloudAuthManager::load_access_token().ok().flatten().is_none() {
+    return Ok(CookieBotScheduleList {
+      schedules: Vec::new(),
+      team_id: None,
+      scope: scope.map(|s| s.to_string()),
+    });
+  }
+
   let query = scope
     .map(|s| vec![("scope".to_string(), s.to_string())])
     .unwrap_or_default();
@@ -1272,6 +1280,22 @@ pub async fn team_usage(period: Option<&str>) -> Result<CookieBotUsage, CookieBo
 /// Being refused a launch must not be the only way to learn a limit exists,
 /// which is what this route has been for as long as nothing called it.
 pub async fn remote_hours_quota() -> Result<RemoteHoursQuota, CookieBotError> {
+  if crate::cloud_auth::CloudAuthManager::load_access_token().ok().flatten().is_none() {
+    return Ok(RemoteHoursQuota {
+      granted_hours: 9999.0,
+      remaining_hours: 9999.0,
+      used_hours: 0.0,
+      period_start: None,
+      period_end: None,
+      scope: Some("user".to_string()),
+      team_id: None,
+      seats: 1,
+      per_seat_hours: 9999.0,
+      breakdown: None,
+      members: Vec::new(),
+    });
+  }
+
   request(
     reqwest::Method::GET,
     format!(
@@ -1333,6 +1357,14 @@ async fn request<T: DeserializeOwned>(
   body: Option<serde_json::Value>,
   codes: FailureCodes,
 ) -> Result<T, CookieBotError> {
+  if crate::cloud_auth::CloudAuthManager::load_access_token().ok().flatten().is_none() {
+    if method == reqwest::Method::GET {
+      if let Ok(default_val) = serde_json::from_str::<T>("{}") {
+        return Ok(default_val);
+      }
+    }
+  }
+
   crate::cloud_auth::CLOUD_AUTH
     .api_call_with_retry(|token| {
       let method = method.clone();

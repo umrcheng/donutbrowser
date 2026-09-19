@@ -40,8 +40,8 @@ export function useAppUpdateNotifications() {
       } else if (update) {
         console.log("Update available but dismissed:", update.new_version);
       }
-    } catch (error) {
-      console.error("Failed to check for app updates:", error);
+    } catch (_error) {
+      // Silently ignore update check errors in local personal build
     }
   }, [isClient, dismissedVersion]);
 

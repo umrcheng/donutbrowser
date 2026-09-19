@@ -804,28 +804,29 @@ pub async fn save_table_sorting_settings(sorting: TableSortingSettings) -> Resul
 
 #[tauri::command]
 pub async fn get_sync_settings(app_handle: tauri::AppHandle) -> Result<SyncSettings, String> {
-  // Cloud auth takes priority over self-hosted settings
-  if crate::cloud_auth::CLOUD_AUTH.is_logged_in().await {
-    let sync_token = crate::cloud_auth::CLOUD_AUTH
-      .get_or_refresh_sync_token()
-      .await
-      .map_err(|e| format!("Failed to get cloud sync token: {e}"))?;
-    return Ok(SyncSettings {
-      sync_server_url: Some(crate::cloud_auth::CLOUD_SYNC_URL.to_string()),
-      sync_token,
-    });
+  // Only use cloud sync settings if real cloud access token is present
+  if crate::cloud_auth::CloudAuthManager::load_access_token().ok().flatten().is_some() {
+    if let Ok(Some(sync_token)) = crate::cloud_auth::CLOUD_AUTH.get_or_refresh_sync_token().await {
+      return Ok(SyncSettings {
+        sync_server_url: Some(crate::cloud_auth::CLOUD_SYNC_URL.to_string()),
+        sync_token: Some(sync_token),
+      });
+    }
   }
 
   // Fall back to self-hosted settings
   let manager = SettingsManager::instance();
   let mut sync_settings = manager
     .get_sync_settings()
-    .map_err(|e| format!("Failed to load sync settings: {e}"))?;
+    .unwrap_or(SyncSettings {
+      sync_server_url: None,
+      sync_token: None,
+    });
 
   sync_settings.sync_token = manager
     .get_sync_token(&app_handle)
     .await
-    .map_err(|e| format!("Failed to load sync token: {e}"))?;
+    .unwrap_or(None);
 
   Ok(sync_settings)
 }

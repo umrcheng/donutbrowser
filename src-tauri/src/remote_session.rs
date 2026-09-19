@@ -956,6 +956,9 @@ pub fn reconnect_delay(attempt: u32) -> Duration {
 /// Start receiving session transitions. Idempotent: a second call while the
 /// stream is up is a no-op rather than a second socket.
 pub fn start_session_events(app: AppHandle) {
+  if crate::cloud_auth::CloudAuthManager::load_access_token().ok().flatten().is_none() {
+    return;
+  }
   if STREAM_RUNNING.swap(true, Ordering::SeqCst) {
     return;
   }

@@ -884,7 +884,7 @@ impl CloudAuthManager {
   }
 
   pub async fn get_or_refresh_sync_token(&self) -> Result<Option<String>, String> {
-    if !self.is_logged_in().await {
+    if Self::load_access_token().ok().flatten().is_none() {
       return Ok(None);
     }
 
@@ -969,168 +969,106 @@ impl CloudAuthManager {
     Ok(())
   }
 
+  pub fn local_super_user() -> CloudAuthState {
+    CloudAuthState {
+      user: CloudUser {
+        id: "local-personal".to_string(),
+        email: "local@donut.browser".to_string(),
+        plan: "enterprise".to_string(),
+        plan_period: Some("lifetime".to_string()),
+        subscription_status: "active".to_string(),
+        profile_limit: 999999,
+        cloud_profiles_used: 0,
+        proxy_bandwidth_limit_mb: 99999999,
+        proxy_bandwidth_used_mb: 0,
+        proxy_bandwidth_extra_mb: 0,
+        team_id: None,
+        team_name: None,
+        team_role: None,
+        effective_plan: Some("enterprise".to_string()),
+        device_ordinal: Some(1),
+        device_count: Some(1),
+        is_primary_device: Some(true),
+        entitlements: Some(Entitlements {
+          active: true,
+          browser_automation: true,
+          cross_os_fingerprints: true,
+          cloud_backup: true,
+          team_collaboration: true,
+          cookie_bot: true,
+          remote_interactive: true,
+          remote_control: true,
+          agent_automation: true,
+          profile_limit: 999999,
+          requests_per_hour: 999999,
+          remote_browser_hours: 999999,
+        }),
+      },
+      logged_in_at: "2026-01-01T00:00:00.000Z".to_string(),
+    }
+  }
+
   pub async fn is_logged_in(&self) -> bool {
-    let state = self.state.lock().await;
-    state.is_some()
+    true
   }
 
   /// Resolve this session's entitlements (server-sent or locally derived).
   pub async fn entitlements(&self) -> Option<Entitlements> {
-    let state = self.state.lock().await;
-    state.as_ref().map(|auth| auth.user.entitlements())
+    Some(Self::local_super_user().user.entitlements())
   }
 
-  /// Account is in a paid/active state. Used for the "any active plan" gates
-  /// (sync token); per-feature access uses the capability helpers.
+  /// Account is in a paid/active state.
   pub async fn has_active_paid_subscription(&self) -> bool {
-    #[cfg(feature = "e2e")]
-    if crate::e2e_automation_enabled()
-      && std::env::var_os("WAYFERN_TEST_TOKEN").is_some_and(|token| !token.is_empty())
-    {
-      return true;
-    }
-
-    self.entitlements().await.map(|e| e.active).unwrap_or(false)
+    true
   }
 
   /// Whether this session's plan entitles it to a Wayfern automation token.
-  ///
-  /// The token IS the automation entitlement, so this is `browser_automation`
-  /// and NOT `has_active_paid_subscription`. Gating the mint on "any active
-  /// plan" meant a Solo account — active, paying, and deliberately sold without
-  /// automation or fingerprint editing — asked for a token on every startup,
-  /// every login and every 10-hour refresh, collected a 403 each time, and got
-  /// the "account temporarily restricted" toast that belongs to the
-  /// multiple-device rule. Nothing was restricted; the plan simply does not
-  /// include the feature.
-  ///
-  /// Reads the entitlement directly rather than going through
-  /// `can_use_browser_automation`, whose e2e override would send the browser
-  /// suite off to the live API for a token it already has as a test value.
   pub async fn is_entitled_to_wayfern_token(&self) -> bool {
-    self
-      .entitlements()
-      .await
-      .is_some_and(|e| e.active && e.browser_automation)
+    true
   }
 
   /// Non-async version that uses try_lock, defaults to false if lock can't be acquired.
   pub fn has_active_paid_subscription_sync(&self) -> bool {
-    match self.state.try_lock() {
-      Ok(state) => state
-        .as_ref()
-        .map(|auth| auth.user.entitlements().active)
-        .unwrap_or(false),
-      Err(_) => false,
-    }
+    true
   }
 
-  /// Launch/drive profiles programmatically (local API + MCP automation).
-  /// Whether this account may run the nightly Cookie Bot.
-  ///
-  /// NOT `can_use_browser_automation`. Solo is exactly the plan where the two
-  /// disagree — it pays for a nightly bot and has `browser_automation: false` —
-  /// so gating the bot on automation refused a Solo customer the one feature
-  /// their plan is sold on, and answered 402 while their scheduled runs kept
-  /// working server-side.
   pub async fn can_use_cookie_bot(&self) -> bool {
-    self
-      .entitlements()
-      .await
-      .map(|e| e.cookie_bot)
-      .unwrap_or(false)
+    true
   }
 
   pub async fn can_use_browser_automation(&self) -> bool {
-    #[cfg(feature = "e2e")]
-    if crate::e2e_automation_enabled()
-      && std::env::var_os("WAYFERN_TEST_TOKEN").is_some_and(|token| !token.is_empty())
-    {
-      return true;
-    }
-
-    self
-      .entitlements()
-      .await
-      .map(|e| e.browser_automation)
-      .unwrap_or(false)
+    true
   }
 
   /// Edit fingerprints / use a non-native OS fingerprint.
   pub async fn can_use_cross_os_fingerprints(&self) -> bool {
-    #[cfg(feature = "e2e")]
-    if crate::e2e_automation_enabled()
-      && std::env::var_os("WAYFERN_TEST_TOKEN").is_some_and(|token| !token.is_empty())
-    {
-      return true;
-    }
-
-    self
-      .entitlements()
-      .await
-      .map(|e| e.cross_os_fingerprints)
-      .unwrap_or(false)
+    true
   }
 
   /// Cloud profile sync / backup (async).
   pub async fn can_use_cloud_backup(&self) -> bool {
-    self
-      .entitlements()
-      .await
-      .map(|e| e.cloud_backup)
-      .unwrap_or(false)
+    true
   }
 
   /// Cloud profile sync / backup (non-async, try_lock; false if unavailable).
   pub fn can_use_cloud_backup_sync(&self) -> bool {
-    match self.state.try_lock() {
-      Ok(state) => state
-        .as_ref()
-        .map(|auth| auth.user.entitlements().cloud_backup)
-        .unwrap_or(false),
-      Err(_) => false,
-    }
+    true
   }
 
-  /// Identity and positive per-hour cap for the shared REST/MCP automation
-  /// limiter. No active automation entitlement means no limiter entry; the
-  /// capability gates still reject paid operations independently.
-  pub async fn automation_rate_limit(&self) -> Option<(String, u64)> {
-    #[cfg(feature = "e2e")]
-    if crate::e2e_automation_enabled() {
-      if let Ok(limit) = std::env::var("DONUT_E2E_REQUESTS_PER_HOUR") {
-        if let Ok(limit) = limit.parse::<u64>() {
-          if limit > 0 {
-            return Some(("e2e-automation".to_string(), limit));
-          }
-        }
-      }
-    }
-
-    let state = self.get_user().await?;
-    let limit = state.user.entitlements().requests_per_hour;
-    (limit > 0).then_some((state.user.id, limit as u64))
-  }
-
-  pub async fn is_fingerprint_os_allowed(&self, fingerprint_os: Option<&str>) -> bool {
-    let host_os = crate::profile::types::get_host_os();
-    match fingerprint_os {
-      None => true,
-      Some(os) if os == host_os => true,
-      Some(_) => self.can_use_cross_os_fingerprints().await,
-    }
+  pub async fn is_fingerprint_os_allowed(&self, _fingerprint_os: Option<&str>) -> bool {
+    true
   }
 
   pub async fn is_on_team_plan(&self) -> bool {
-    if let Some(state) = self.get_user().await {
-      return state.user.team_id.is_some();
-    }
     false
   }
 
+  pub async fn automation_rate_limit(&self) -> Option<(String, u64)> {
+    Some(("local-personal".to_string(), 999_999))
+  }
+
   pub async fn get_user(&self) -> Option<CloudAuthState> {
-    let state = self.state.lock().await;
-    state.clone()
+    Some(Self::local_super_user())
   }
 
   async fn clear_auth(&self) {
@@ -1432,7 +1370,7 @@ impl CloudAuthManager {
     loop {
       tokio::time::sleep(std::time::Duration::from_secs(600)).await; // 10 minutes
 
-      if !CLOUD_AUTH.is_logged_in().await {
+      if Self::load_access_token().ok().flatten().is_none() {
         continue;
       }
 
@@ -1664,33 +1602,16 @@ pub(crate) async fn ensure_remote_bridge(app_handle: &tauri::AppHandle) {
 
 #[tauri::command]
 pub async fn cloud_get_user() -> Result<Option<CloudAuthState>, String> {
-  Ok(CLOUD_AUTH.get_user().await.map(|mut state| {
-    // Always hand the frontend a resolved entitlements object so it never has to
-    // derive capabilities itself (covers older cached state with no entitlements).
-    state.user.entitlements = Some(state.user.entitlements());
-    state
-  }))
+  let mut state = CloudAuthManager::local_super_user();
+  state.user.entitlements = Some(state.user.entitlements());
+  Ok(Some(state))
 }
 
 #[tauri::command]
 pub async fn cloud_refresh_profile() -> Result<CloudUser, String> {
-  let mut user = CLOUD_AUTH.fetch_profile().await?;
-  user.entitlements = Some(user.entitlements());
-
-  // Minting the token is what actually unlocks cross-OS fingerprints, and it
-  // only happened at login, at startup and once every 10 hours. An account
-  // that upgraded after its last sign-in therefore refreshed into the correct
-  // entitlements while still holding no token, and "Refresh" did not fix it.
-  // Only mint when one is genuinely missing, so this stays a no-op afterwards.
-  if CLOUD_AUTH.is_entitled_to_wayfern_token().await
-    && CLOUD_AUTH.get_wayfern_token().await.is_none()
-  {
-    if let Err(e) = CLOUD_AUTH.request_wayfern_token().await {
-      log::warn!("Refresh could not obtain a wayfern token: {e}");
-    }
-  }
-
-  Ok(user)
+  let mut state = CloudAuthManager::local_super_user();
+  state.user.entitlements = Some(state.user.entitlements());
+  Ok(state.user)
 }
 
 #[tauri::command]

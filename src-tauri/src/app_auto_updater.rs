@@ -2022,10 +2022,13 @@ pub async fn check_for_app_updates() -> Result<Option<AppUpdateInfo>, String> {
   }
 
   let updater = AppAutoUpdater::instance();
-  updater
-    .check_for_updates()
-    .await
-    .map_err(|e| format!("Failed to check for app updates: {e}"))
+  match updater.check_for_updates().await {
+    Ok(info) => Ok(info),
+    Err(e) => {
+      log::warn!("Failed to check for app updates: {e}");
+      Ok(None)
+    }
+  }
 }
 
 #[tauri::command]
