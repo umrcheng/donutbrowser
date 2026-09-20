@@ -813,6 +813,10 @@ const GEO_DERIVED_KEYS: [&str; 2] = ["timezoneOffset", "languages"];
 const DERIVED_PROVENANCE_KEYS: [&str; 3] =
   ["webglProfileId", "mediaProfile", "deviceProfileApplied"];
 
+/// Fields that Wayfern (Chromium-based) rejects in identity overrides because
+/// they belong to other browser engines (e.g. `oscpu` is Firefox-only).
+const CHROMIUM_UNSUPPORTED_OVERRIDE_KEYS: [&str; 1] = ["oscpu"];
+
 /// Location fields donutbrowser owns end to end (`apply_geolocation` writes all
 /// of them). Any of these the browser does not echo back after an identity is
 /// applied is refilled from the stored fingerprint, so what donut persists
@@ -1001,34 +1005,27 @@ impl WayfernManager {
     base_ua: Option<&str>,
   ) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
-    let (platform, ua_fragment, oscpu) = match target_os.to_lowercase().as_str() {
+    let (platform, ua_fragment) = match target_os.to_lowercase().as_str() {
       "macos" => (
         "MacIntel",
         "Macintosh; Intel Mac OS X 10_15_7",
-        Some("Intel Mac OS X 10.15"),
       ),
       "linux" => (
         "Linux x86_64",
         "X11; Linux x86_64",
-        Some("Linux x86_64"),
       ),
       "android" => (
         "Linux armv8l",
         "Linux; Android 14; K",
-        None,
       ),
       "ios" => (
         "iPhone",
         "iPhone; CPU iPhone OS 17_5 like Mac OS X",
-        None,
       ),
       _ => return map,
     };
 
     map.insert("platform".to_string(), json!(platform));
-    if let Some(cpu) = oscpu {
-      map.insert("oscpu".to_string(), json!(cpu));
-    }
 
     let target_ua = match base_ua {
       Some(ua) => {
@@ -1198,6 +1195,7 @@ impl WayfernManager {
       if DERIVED_PROVENANCE_KEYS.contains(&key.as_str())
         || GEO_PARAM_KEYS.contains(&key.as_str())
         || LOCALE_CARRY_OVER_KEYS.contains(&key.as_str())
+        || CHROMIUM_UNSUPPORTED_OVERRIDE_KEYS.contains(&key.as_str())
         || value.is_null()
       {
         continue;
@@ -1275,7 +1273,10 @@ impl WayfernManager {
     let synthesised = Self::donut_synthesised_geo_fields(current);
     let mut overrides = serde_json::Map::new();
     for (key, value) in current {
-      if GEO_PARAM_KEYS.contains(&key.as_str()) || DERIVED_PROVENANCE_KEYS.contains(&key.as_str()) {
+      if GEO_PARAM_KEYS.contains(&key.as_str())
+        || DERIVED_PROVENANCE_KEYS.contains(&key.as_str())
+        || CHROMIUM_UNSUPPORTED_OVERRIDE_KEYS.contains(&key.as_str())
+      {
         continue;
       }
       if GEO_DERIVED_KEYS.contains(&key.as_str()) && synthesised.get(key) == Some(value) {
@@ -1486,6 +1487,9 @@ impl WayfernManager {
       document.insert("longitude".to_string(), json!(longitude));
     }
     let mut overrides = Self::stored_object(config.identity_overrides.as_deref());
+    for key in CHROMIUM_UNSUPPORTED_OVERRIDE_KEYS {
+      overrides.remove(key);
+    }
     if claimed_os != host_os.as_str() {
       let existing_ua = overrides.get("userAgent").and_then(|v| v.as_str());
       let cross_overrides = Self::generate_cross_os_overrides(claimed_os, existing_ua);
@@ -2472,7 +2476,7 @@ impl WayfernManager {
                       "Pre-launch: Cookie decryption SUCCEEDED for '{}' (host: {}, decrypted {} bytes)",
                       name, host, val.len()
                     ),
-                    None => log::error!(
+                    None => log::debug!(
                       "Pre-launch: Cookie decryption FAILED for '{}' (host: {}, encrypted {} bytes)",
                       name, host, encrypted.len()
                     ),
@@ -2481,7 +2485,7 @@ impl WayfernManager {
               }
             }
           } else {
-            log::error!("Pre-launch: Failed to derive encryption key from os_crypt_key");
+            log::debug!("Pre-launch: Failed to derive encryption key from os_crypt_key");
           }
         }
       } else {
@@ -2865,6 +2869,9 @@ impl WayfernManager {
       let wayfern_token = crate::cloud_auth::CLOUD_AUTH.get_wayfern_token().await;
 
       let mut final_overrides = overrides.clone();
+      for key in CHROMIUM_UNSUPPORTED_OVERRIDE_KEYS {
+        final_overrides.remove(key);
+      }
       let host_os = crate::profile::types::get_host_os();
       let claimed_os = config.os.as_deref().unwrap_or(host_os.as_str());
       let kernel_os = if wayfern_token.is_some() {
@@ -4572,6 +4579,7 @@ mod tests {
     let current = obj(
       r#"{"platform": "Win32", "webglProfileId": "webgl-abc",
           "mediaProfile": "media-abc", "deviceProfileApplied": true,
+          "oscpu": "Intel Mac OS X 10.15",
           "doNotTrack": "1"}"#,
     );
 
